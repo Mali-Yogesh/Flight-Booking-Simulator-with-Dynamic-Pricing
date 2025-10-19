@@ -1,0 +1,373 @@
+"""
+Flight Booking Simulator with Dynamic Pricing
+FastAPI application (single-file) implementing:
+- Flight/Airline models (SQLModel + SQLite)
+- Endpoints:
+    GET /flights                 -> retrieve all flights with current dynamic price
+    GET /flights/{flight_id}     -> retrieve single flight
+    GET /flights/search          -> search by origin, destination, date; supports sorting by price or duration
+    GET /external/schedules/{airline_id} -> simulated external airline schedule API
+- Dynamic pricing engine integrated into search responses
+- Background task that simulates demand and availability changes and records fare history
+
+How to run:
+  pip install fastapi uvicorn sqlmodel[sqlite] alembic
+  python flight_api_fastapi.py
+  # or
+  uvicorn flight_api_fastapi:app --reload
+
+Note: This file creates a local SQLite DB 'flights.db' in working directory.
+"""
+
+from typing import Optional, List
+from datetime import datetime, timedelta, date
+import asyncio
+import random
+import math
+
+from sqlmodel import Field, SQLModel, create_engine, Session, select
+from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, constr
+
+DB_FILE = "sqlite:///./flights.db"
+engine = create_engine(DB_FILE, echo=False)
+
+app = FastAPI(title="Flight Booking Simulator with Dynamic Pricing")
+
+class Airline(SQLModel, table=True):
+    airline_id: Optional[int] = Field(default=None, primary_key=True)
+    airline_name: str
+
+class Flight(SQLModel, table=True):
+    flight_id: Optional[int] = Field(default=None, primary_key=True)
+    flight_no: str
+    airline_id: int
+    origin: str
+    destination: str
+    departure: datetime
+    arrival: datetime
+    base_fare: float
+    total_seats: int
+    seats_available: int
+
+class FareHistory(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    flight_id: int
+    timestamp: datetime
+    price: float
+    seats_available: int
+    demand_level: float
+
+class DemandSnapshot(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    flight_id: int
+    timestamp: datetime
+    demand_level: float
+
+class FlightOut(BaseModel):
+    flight_id: int
+    flight_no: str
+    airline_id: int
+    origin: str
+    destination: str
+    departure: datetime
+    arrival: datetime
+    base_fare: float
+    total_seats: int
+    seats_available: int
+    current_price: float
+
+def compute_dynamic_price(base_fare: float,
+                          seats_available: int,
+                          total_seats: int,
+                          departure: datetime,
+                          demand_level: float) -> float:
+    """
+    Price calculation considers:
+      - remaining seat percentage (scarcity)
+      - time until departure (urgency)
+      - simulated demand_level (0..1)
+      - base fare and pricing tiers
+
+    Returns final price (rounded to 2 decimals)
+    """
+    seats_available = max(0, seats_available)
+    total_seats = max(1, total_seats)
+
+    remaining_pct = seats_available / total_seats  # 1.0 -> full availability
+
+    scarcity_multiplier = 1.0 + (1.0 - remaining_pct) ** 1.5 * 1.4  # up to ~2.4x when very scarce
+    hours_to_departure = max(0.0, (departure - datetime.utcnow()).total_seconds() / 3600.0)
+
+    if hours_to_departure > 72:
+        time_multiplier = 0.98  # slight discount for early bookers
+    elif hours_to_departure > 24:
+        time_multiplier = 1.0
+    elif hours_to_departure > 6:
+        time_multiplier = 1.12
+    else:
+        time_multiplier = 1.35  # last minute premium
+
+    # Demand multiplier: directly from simulated demand level (0..1)
+    demand_multiplier = 1.0 + demand_level * 0.8  # up to +80%
+
+    # Pricing tier: small rounding tiers based on base fare
+    tier = 1
+    if base_fare < 5000:
+        tier = 1
+    elif base_fare < 8000:
+        tier = 0.98
+    else:
+        tier = 1.02
+
+    raw_price = base_fare * scarcity_multiplier * time_multiplier * demand_multiplier * tier
+
+    # Minimum price floor: don't go below base fare * 0.8
+    floor = base_fare * 0.8
+    price = max(floor, raw_price)
+
+    # Round to 2 decimals
+    return round(price, 2)
+
+def init_db():
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        
+        result = session.exec(select(Airline)).first()
+        if not result:
+            airlines = [Airline(airline_name='Air India'), Airline(airline_name='IndiGo'), Airline(airline_name='SpiceJet')]
+            session.add_all(airlines)
+            session.commit()
+
+        flights_count = session.exec(select(Flight)).all()
+        if not flights_count:
+            now = datetime.utcnow()
+            sample = [
+                Flight(flight_no='AI101', airline_id=1, origin='Delhi', destination='Mumbai', departure=now + timedelta(days=10, hours=3), arrival=now + timedelta(days=10, hours=5), base_fare=8000, total_seats=200, seats_available=150),
+                Flight(flight_no='AI102', airline_id=1, origin='Mumbai', destination='Delhi', departure=now + timedelta(days=11, hours=6), arrival=now + timedelta(days=11, hours=8), base_fare=8200, total_seats=200, seats_available=180),
+                Flight(flight_no='6E201', airline_id=2, origin='Delhi', destination='Chennai', departure=now + timedelta(days=9, hours=1), arrival=now + timedelta(days=9, hours=3, minutes=15), base_fare=7500, total_seats=180, seats_available=100),
+                Flight(flight_no='SJ301', airline_id=3, origin='Chennai', destination='Mumbai', departure=now + timedelta(days=7, hours=4), arrival=now + timedelta(days=7, hours=6, minutes=15), base_fare=7000, total_seats=160, seats_available=90),
+            ]
+            session.add_all(sample)
+            session.commit()
+
+@app.get('/external/schedules/{airline_id}')
+async def external_schedule(airline_id: int):
+    """Simulated external schedule API for a given airline."""
+    # In real life this would call an external service. Here we return mock schedules.
+    with Session(engine) as session:
+        airline = session.get(Airline, airline_id)
+        if not airline:
+            raise HTTPException(status_code=404, detail='Airline not found')
+        # return flights for that airline
+        flights = session.exec(select(Flight).where(Flight.airline_id == airline_id)).all()
+        out = []
+        for f in flights:
+            out.append({
+                'flight_no': f.flight_no,
+                'origin': f.origin,
+                'destination': f.destination,
+                'departure': f.departure.isoformat(),
+                'arrival': f.arrival.isoformat(),
+                'seats_available': f.seats_available
+            })
+        return {'airline': airline.airline_name, 'schedules': out}
+
+@app.get('/flights', response_model=List[FlightOut])
+async def get_flights(sort_by: Optional[str] = Query(None, regex='^(price|duration|departure)$'),
+                      order: Optional[str] = Query('asc', regex='^(asc|desc)$')):
+    """Return all flights with computed current_price. Can sort by price/duration/departure."""
+    with Session(engine) as session:
+        flights = session.exec(select(Flight)).all()
+        out = []
+        for f in flights:
+            demand_snapshot = session.exec(select(DemandSnapshot).where(DemandSnapshot.flight_id == f.flight_id).order_by(DemandSnapshot.timestamp.desc())).first()
+            demand = demand_snapshot.demand_level if demand_snapshot else random.random() * 0.5
+            price = compute_dynamic_price(f.base_fare, f.seats_available, f.total_seats, f.departure, demand)
+            out.append(FlightOut(
+                flight_id=f.flight_id,
+                flight_no=f.flight_no,
+                airline_id=f.airline_id,
+                origin=f.origin,
+                destination=f.destination,
+                departure=f.departure,
+                arrival=f.arrival,
+                base_fare=f.base_fare,
+                total_seats=f.total_seats,
+                seats_available=f.seats_available,
+                current_price=price
+            ))
+
+    # Sorting
+    if sort_by:
+        reverse = order == 'desc'
+        if sort_by == 'price':
+            out.sort(key=lambda x: x.current_price, reverse=reverse)
+        elif sort_by == 'duration':
+            out.sort(key=lambda x: (x.arrival - x.departure).total_seconds(), reverse=reverse)
+        elif sort_by == 'departure':
+            out.sort(key=lambda x: x.departure, reverse=reverse)
+
+    return out
+
+@app.get('/flights/{flight_id}', response_model=FlightOut)
+async def get_flight(flight_id: int):
+    with Session(engine) as session:
+        f = session.get(Flight, flight_id)
+        if not f:
+            raise HTTPException(status_code=404, detail='Flight not found')
+        demand_snapshot = session.exec(select(DemandSnapshot).where(DemandSnapshot.flight_id == f.flight_id).order_by(DemandSnapshot.timestamp.desc())).first()
+        demand = demand_snapshot.demand_level if demand_snapshot else random.random() * 0.5
+        price = compute_dynamic_price(f.base_fare, f.seats_available, f.total_seats, f.departure, demand)
+        return FlightOut(
+            flight_id=f.flight_id,
+            flight_no=f.flight_no,
+            airline_id=f.airline_id,
+            origin=f.origin,
+            destination=f.destination,
+            departure=f.departure,
+            arrival=f.arrival,
+            base_fare=f.base_fare,
+            total_seats=f.total_seats,
+            seats_available=f.seats_available,
+            current_price=price
+        )
+
+@app.get('/flights/search', response_model=List[FlightOut])
+async def search_flights(origin: Optional[constr(strip_whitespace=True, min_length=1)] = None,
+                         destination: Optional[constr(strip_whitespace=True, min_length=1)] = None,
+                         date_str: Optional[str] = Query(None, description='YYYY-MM-DD'),
+                         sort_by: Optional[str] = Query(None, regex='^(price|duration|departure)$'),
+                         order: Optional[str] = Query('asc', regex='^(asc|desc)$')):
+    """Search flights by origin/destination/date. Date filters departure date (UTC date).
+    Sorting by price or duration is supported.
+    """
+    # Input validation
+    if not (origin or destination or date_str):
+        raise HTTPException(status_code=400, detail='At least one of origin, destination or date must be provided')
+
+    dt_date: Optional[date] = None
+    if date_str:
+        try:
+            dt_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail='date must be in YYYY-MM-DD format')
+
+    with Session(engine) as session:
+        query = select(Flight)
+        if origin:
+            query = query.where(Flight.origin.ilike(f"%{origin}%"))
+        if destination:
+            query = query.where(Flight.destination.ilike(f"%{destination}%"))
+        if dt_date:
+            start = datetime.combine(dt_date, datetime.min.time())
+            end = datetime.combine(dt_date, datetime.max.time())
+            query = query.where(Flight.departure >= start, Flight.departure <= end)
+
+        flights = session.exec(query).all()
+        if not flights:
+            return []
+
+        out = []
+        for f in flights:
+            demand_snapshot = session.exec(select(DemandSnapshot).where(DemandSnapshot.flight_id == f.flight_id).order_by(DemandSnapshot.timestamp.desc())).first()
+            demand = demand_snapshot.demand_level if demand_snapshot else random.random() * 0.5
+            price = compute_dynamic_price(f.base_fare, f.seats_available, f.total_seats, f.departure, demand)
+            out.append(FlightOut(
+                flight_id=f.flight_id,
+                flight_no=f.flight_no,
+                airline_id=f.airline_id,
+                origin=f.origin,
+                destination=f.destination,
+                departure=f.departure,
+                arrival=f.arrival,
+                base_fare=f.base_fare,
+                total_seats=f.total_seats,
+                seats_available=f.seats_available,
+                current_price=price
+            ))
+
+    # Sorting
+    if sort_by:
+        reverse = order == 'desc'
+        if sort_by == 'price':
+            out.sort(key=lambda x: x.current_price, reverse=reverse)
+        elif sort_by == 'duration':
+            out.sort(key=lambda x: (x.arrival - x.departure).total_seconds(), reverse=reverse)
+        elif sort_by == 'departure':
+            out.sort(key=lambda x: x.departure, reverse=reverse)
+
+    return out
+
+SIMULATION_INTERVAL_SEC = 10  # for demo, every 10s
+
+async def simulation_loop():
+    """Background loop that simulates demand and occasionally books seats (reduces availability)
+    and writes fare history entries.
+
+    This should be started at application startup.
+    """
+    await asyncio.sleep(2)
+    while True:
+        try:
+            with Session(engine) as session:
+                flights = session.exec(select(Flight)).all()
+                for f in flights:
+                    # Simulate demand as combination of random + proximity to departure
+                    hours_to_departure = max(0.0, (f.departure - datetime.utcnow()).total_seconds() / 3600.0)
+                    base_demand = 0.2 + random.random() * 0.5
+                    # increase demand if departure is within 72 hours
+                    if hours_to_departure < 72:
+                        proximity_factor = (72 - hours_to_departure) / 72.0
+                        base_demand += proximity_factor * 0.4
+
+                    # Clamp
+                    demand_level = max(0.0, min(1.0, base_demand))
+
+                    # Occasionally simulate bookings (reduce seats_available by 0..3)
+                    if random.random() < 0.25 and f.seats_available > 0:
+                        booked = random.randint(1, min(3, f.seats_available))
+                        f.seats_available = max(0, f.seats_available - booked)
+
+                    # Save DemandSnapshot
+                    snapshot = DemandSnapshot(flight_id=f.flight_id, timestamp=datetime.utcnow(), demand_level=demand_level)
+                    session.add(snapshot)
+
+                    # Compute price and store FareHistory
+                    price = compute_dynamic_price(f.base_fare, f.seats_available, f.total_seats, f.departure, demand_level)
+                    fh = FareHistory(flight_id=f.flight_id, timestamp=datetime.utcnow(), price=price, seats_available=f.seats_available, demand_level=demand_level)
+                    session.add(fh)
+
+                session.commit()
+        except Exception as e:
+            print('Simulation loop error:', e)
+
+        await asyncio.sleep(SIMULATION_INTERVAL_SEC)
+
+@app.on_event('startup')
+async def on_startup():
+    init_db()
+    # Start simulation background task
+    loop = asyncio.get_event_loop()
+    loop.create_task(simulation_loop())
+
+@app.get('/flights/{flight_id}/fare_history')
+async def fare_history(flight_id: int, limit: int = Query(50, ge=1, le=1000)):
+    with Session(engine) as session:
+        _f = session.get(Flight, flight_id)
+        if not _f:
+            raise HTTPException(status_code=404, detail='Flight not found')
+        rows = session.exec(select(FareHistory).where(FareHistory.flight_id == flight_id).order_by(FareHistory.timestamp.desc()).limit(limit)).all()
+        return [
+            {
+                'timestamp': r.timestamp.isoformat(),
+                'price': float(r.price),
+                'seats_available': r.seats_available,
+                'demand_level': float(r.demand_level)
+            }
+            for r in rows
+        ]
+if __name__ == '__main__':
+    import uvicorn
+    init_db()
+    uvicorn.run('flight_api_fastapi:app', host='0.0.0.0', port=8000, reload=True)
