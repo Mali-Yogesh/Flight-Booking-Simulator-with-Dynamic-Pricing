@@ -1,0 +1,360 @@
+-- MILESTONE 1: DATABASE SCHEMA DESIGN AND IMPLEMENTATION
+
+-- 1. DROP EXISTING TABLES (Ensures a clean start and resolves schema errors)
+DROP TABLE IF EXISTS booking;
+DROP TABLE IF EXISTS cancelled_booking;
+DROP TABLE IF EXISTS flight;
+DROP TABLE IF EXISTS airport_lookup;
+DROP TABLE IF EXISTS user;
+
+
+-- 2. SCHEMA DEFINITION
+
+-- User table (Final Schema: Updated with required fields for registration: full_name, phone, country)
+CREATE TABLE user (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username VARCHAR(20) NOT NULL UNIQUE,
+    password_hash VARCHAR(128) NOT NULL,
+    full_name VARCHAR(100),
+    phone VARCHAR(20),
+    country VARCHAR(50)
+);
+
+-- Airport Lookup Table (For mapping codes to names)
+CREATE TABLE airport_lookup (
+    code VARCHAR(10) PRIMARY KEY,
+    city_country VARCHAR(100) NOT NULL
+);
+
+-- Flight table (Core data, using City/Country Names)
+CREATE TABLE flight (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    flight_number VARCHAR(50) NOT NULL UNIQUE,
+    airline VARCHAR(50) NOT NULL,
+    from_city_country VARCHAR(100) NOT NULL, 
+    to_city_country VARCHAR(100) NOT NULL,
+    base_price REAL NOT NULL,
+    total_seats INTEGER NOT NULL,
+    seats_remaining INTEGER NOT NULL,
+    demand_factor REAL DEFAULT 1.0, 
+    CHECK(seats_remaining >= 0 AND seats_remaining <= total_seats)
+);
+
+-- Booking table (Finalized structure with status and passenger name)
+CREATE TABLE booking (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    flight_id INTEGER NOT NULL,
+    pnr VARCHAR(10) NOT NULL UNIQUE,
+    price_paid REAL NOT NULL,
+    booking_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING_PAYMENT',
+    passenger_full_name VARCHAR(100),
+    FOREIGN KEY (user_id) REFERENCES user (id),
+    FOREIGN KEY (flight_id) REFERENCES flight (id)
+);
+
+-- Cancellation Audit Log (For cancellation history tracking)
+CREATE TABLE cancelled_booking (
+    archive_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pnr VARCHAR(10),
+    user_id INTEGER,
+    flight_id INTEGER,
+    price_paid REAL,
+    refund_amount REAL,
+    cancellation_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    passenger_full_name VARCHAR(100)
+);
+
+
+-- 3. POPULATING DATA
+
+-- Inserting sample users (Passwords hashed as '0009')
+INSERT INTO user (username, password_hash, full_name, phone, country) VALUES
+('mentor_user', '44798dd7d0f2c058bff13fdbac8c49b3a2ee56823eddcc2d26054a15ef41c842', 'Mentor Reviewer', '9991112220', 'USA'),
+('testuser', '44798dd7d0f2c058bff13fdbac8c49b3a2ee56823eddcc2d26054a15ef41c842', 'Test User Default', '9992223330', 'UK'),
+('Ali', '44798dd7d0f2c058bff13fdbac8c49b3a2ee56823eddcc2d26054a15ef41c842', 'Ali Hassan', '9876543210', 'India'),
+('JaneDoe', '44798dd7d0f2c058bff13fdbac8c49b3a2ee56823eddcc2d26054a15ef41c842', 'Jane Doe', '1112223333', 'Canada');
+
+-- Inserting City/Country Data (Lookup)
+INSERT INTO airport_lookup (code, city_country) VALUES
+('JFK', 'New York, USA'), ('LHR', 'London, UK'), ('LAX', 'Los Angeles, USA'), ('DXB', 'Dubai, UAE'),
+('CDG', 'Paris, France'), ('NRT', 'Tokyo, Japan'), ('SYD', 'Sydney, Australia'), ('SIN', 'Singapore, Singapore'),
+('HKG', 'Hong Kong, China'), ('FRA', 'Frankfurt, Germany'), ('MUC', 'Munich, Germany'), ('BKK', 'Bangkok, Thailand'),
+('SGN', 'Ho Chi Minh City, Vietnam'), ('ORD', 'Chicago, USA'), ('MIA', 'Miami, USA'), ('AMS', 'Amsterdam, Netherlands'),
+('CPH', 'Copenhagen, Denmark'), ('DEL', 'New Delhi, India'), ('BOM', 'Mumbai, India'), ('PEK', 'Beijing, China'),
+('PVG', 'Shanghai, China'), ('KUL', 'Kuala Lumpur, Malaysia'), ('MEX', 'Mexico City, Mexico'), ('CUN', 'Cancun, Mexico'),
+('DUB', 'Dublin, Ireland'), ('IST', 'Istanbul, Turkey'), ('GIG', 'Rio de Janeiro, Brazil'), ('JNB', 'Johannesburg, South Africa'),
+('YVR', 'Vancouver, Canada'), ('ICN', 'Seoul, South Korea'), ('ATH', 'Athens, Greece'), ('FCO', 'Rome, Italy'),
+('SCL', 'Santiago, Chile'), ('YUL', 'Montreal, Canada'), ('PER', 'Perth, Australia'), ('KWI', 'Kuwait City, Kuwait');
+
+
+-- Inserting 100 Flights (FL001 to FL100)
+INSERT INTO flight (flight_number, airline, from_city_country, to_city_country, base_price, total_seats, seats_remaining) VALUES
+('FL001', 'United Airlines', 'New York, USA', 'London, UK', 550.00, 200, 150), 
+('FL002', 'Emirates', 'Los Angeles, USA', 'Dubai, UAE', 1200.50, 300, 280),
+('FL003', 'Air France', 'Paris, France', 'Tokyo, Japan', 980.25, 250, 220), 
+('FL004', 'United Airlines', 'London, UK', 'New York, USA', 600.00, 200, 180),
+('FL005', 'Qantas', 'Dubai, UAE', 'Sydney, Australia', 1500.75, 400, 350), 
+('FL006', 'Emirates', 'Tokyo, Japan', 'Paris, France', 950.00, 250, 200),
+('FL007', 'Delta Airlines', 'New York, USA', 'Paris, France', 450.00, 180, 100), 
+('FL008', 'United Airlines', 'Sydney, Australia', 'Los Angeles, USA', 1300.00, 400, 390),
+('FL009', 'Singapore Airlines', 'Singapore, Singapore', 'Hong Kong, China', 250.00, 150, 140), 
+('FL010', 'Air France', 'Hong Kong, China', 'Singapore, Singapore', 280.00, 150, 120),
+('FL011', 'Lufthansa', 'Frankfurt, Germany', 'Munich, Germany', 150.00, 100, 80), 
+('FL012', 'Thai Airways', 'Bangkok, Thailand', 'Ho Chi Minh City, Vietnam', 320.00, 120, 110),
+('FL013', 'Thai Airways', 'Ho Chi Minh City, Vietnam', 'Bangkok, Thailand', 300.00, 120, 90), 
+('FL014', 'American Airlines', 'Chicago, USA', 'Miami, USA', 350.00, 220, 200),
+('FL015', 'American Airlines', 'Miami, USA', 'Chicago, USA', 380.00, 220, 190), 
+('FL016', 'KLM', 'Amsterdam, Netherlands', 'Copenhagen, Denmark', 200.00, 110, 50),
+('FL017', 'SAS', 'Copenhagen, Denmark', 'Amsterdam, Netherlands', 210.00, 110, 60), 
+('FL018', 'IndiGo', 'New Delhi, India', 'Mumbai, India', 120.00, 160, 150),
+('FL019', 'Air India', 'Mumbai, India', 'New Delhi, India', 130.00, 160, 140), 
+('FL020', 'Air China', 'Beijing, China', 'Shanghai, China', 180.00, 280, 250),
+('FL021', 'China Eastern', 'Shanghai, China', 'Beijing, China', 190.00, 280, 240), 
+('FL022', 'Qatar Airways', 'Dubai, UAE', 'Kuala Lumpur, Malaysia', 800.00, 320, 310),
+('FL023', 'Qatar Airways', 'Kuala Lumpur, Malaysia', 'Dubai, UAE', 850.00, 320, 300), 
+('FL024', 'Aeroméxico', 'Mexico City, Mexico', 'Cancun, Mexico', 250.00, 180, 170),
+('FL025', 'Viva Aerobus', 'Cancun, Mexico', 'Mexico City, Mexico', 270.00, 180, 160),
+('FL026', 'United Airlines', 'New York, USA', 'Dublin, Ireland', 480.00, 190, 140),
+('FL027', 'Lufthansa', 'Frankfurt, Germany', 'Istanbul, Turkey', 350.00, 160, 120),
+('FL028', 'Emirates', 'Dubai, UAE', 'Rio de Janeiro, Brazil', 1450.00, 350, 300),
+('FL029', 'Qantas', 'Sydney, Australia', 'Johannesburg, South Africa', 1100.00, 280, 250),
+('FL030', 'Air Canada', 'Vancouver, Canada', 'Tokyo, Japan', 850.00, 220, 170),
+('FL031', 'Singapore Airlines', 'Singapore, Singapore', 'Seoul, South Korea', 580.00, 240, 200),
+('FL032', 'Emirates', 'Rio de Janeiro, Brazil', 'Dubai, UAE', 1500.00, 350, 310),
+('FL033', 'KLM', 'Amsterdam, Netherlands', 'New York, USA', 520.00, 210, 160),
+('FL034', 'Air France', 'Paris, France', 'Rio de Janeiro, Brazil', 1150.00, 300, 280),
+('FL035', 'Lufthansa', 'Munich, Germany', 'London, UK', 180.00, 120, 90),
+('FL036', 'United Airlines', 'Chicago, USA', 'New York, USA', 220.00, 250, 210),
+('FL037', 'IndiGo', 'Mumbai, India', 'Bangkok, Thailand', 280.00, 180, 150),
+('FL038', 'Thai Airways', 'Bangkok, Thailand', 'Mumbai, India', 290.00, 180, 160),
+('FL039', 'American Airlines', 'New York, USA', 'Los Angeles, USA', 390.00, 320, 300),
+('FL040', 'Delta Airlines', 'Los Angeles, USA', 'New York, USA', 410.00, 320, 290),
+('FL041', 'Singapore Airlines', 'Seoul, South Korea', 'Singapore, Singapore', 600.00, 240, 210),
+('FL042', 'Qantas', 'Johannesburg, South Africa', 'Sydney, Australia', 1120.00, 280, 260),
+('FL043', 'Air India', 'New Delhi, India', 'Dubai, UAE', 350.00, 200, 180),
+('FL044', 'Emirates', 'Dubai, UAE', 'New Delhi, India', 370.00, 200, 170),
+('FL045', 'Lufthansa', 'Istanbul, Turkey', 'Frankfurt, Germany', 360.00, 160, 130),
+('FL046', 'United Airlines', 'Dublin, Ireland', 'New York, USA', 500.00, 190, 150),
+('FL047', 'Air France', 'Paris, France', 'New York, USA', 550.00, 200, 160),
+('FL048', 'Delta Airlines', 'New York, USA', 'Paris, France', 530.00, 200, 170),
+('FL049', 'KLM', 'Copenhagen, Denmark', 'Amsterdam, Netherlands', 220.00, 110, 70),
+('FL050', 'SAS', 'Amsterdam, Netherlands', 'Copenhagen, Denmark', 230.00, 110, 80),
+('FL051', 'Air China', 'Shanghai, China', 'Hong Kong, China', 150.00, 260, 230),
+('FL052', 'China Eastern', 'Hong Kong, China', 'Shanghai, China', 160.00, 260, 240),
+('FL053', 'Qantas', 'Sydney, Australia', 'Tokyo, Japan', 780.00, 280, 250),
+('FL054', 'Thai Airways', 'Bangkok, Thailand', 'Seoul, South Korea', 450.00, 210, 190),
+('FL055', 'Singapore Airlines', 'Tokyo, Japan', 'Singapore, Singapore', 620.00, 250, 220),
+('FL056', 'Aeroméxico', 'Cancun, Mexico', 'Miami, USA', 200.00, 150, 130),
+('FL057', 'Viva Aerobus', 'Miami, USA', 'Cancun, Mexico', 210.00, 150, 120),
+('FL058', 'Emirates', 'Dubai, UAE', 'London, UK', 650.00, 400, 350),
+('FL059', 'British Airways', 'London, UK', 'Dubai, UAE', 670.00, 400, 360),
+('FL060', 'Lufthansa', 'Frankfurt, Germany', 'New York, USA', 580.00, 280, 240),
+('FL061', 'United Airlines', 'New York, USA', 'Frankfurt, Germany', 560.00, 280, 230),
+('FL062', 'Air India', 'Mumbai, India', 'Dubai, UAE', 300.00, 220, 200),
+('FL063', 'Emirates', 'Dubai, UAE', 'Mumbai, India', 320.00, 220, 190),
+('FL064', 'Qantas', 'Sydney, Australia', 'Vancouver, Canada', 950.00, 270, 240),
+('FL065', 'Air Canada', 'Vancouver, Canada', 'Sydney, Australia', 980.00, 270, 250),
+('FL066', 'SAS', 'Copenhagen, Denmark', 'Istanbul, Turkey', 380.00, 150, 130),
+('FL067', 'Turkish Airlines', 'Istanbul, Turkey', 'Copenhagen, Denmark', 390.00, 150, 140),
+('FL068', 'Delta Airlines', 'Chicago, USA', 'Los Angeles, USA', 250.00, 300, 280),
+('FL069', 'American Airlines', 'Los Angeles, USA', 'Chicago, USA', 260.00, 300, 270),
+('FL070', 'Air France', 'Paris, France', 'Tokyo, Japan', 900.00, 250, 230),
+('FL071', 'Japan Airlines', 'Tokyo, Japan', 'Paris, France', 920.00, 250, 240),
+('FL072', 'Lufthansa', 'Munich, Germany', 'Paris, France', 160.00, 140, 110),
+('FL073', 'KLM', 'Amsterdam, Netherlands', 'London, UK', 130.00, 110, 90),
+('FL074', 'British Airways', 'London, UK', 'Amsterdam, Netherlands', 140.00, 110, 80),
+('FL075', 'Singapore Airlines', 'Singapore, Singapore', 'Dubai, UAE', 750.00, 350, 320),
+('FL076', 'British Airways', 'New York, USA', 'Paris, France', 500.00, 210, 190),
+('FL077', 'Air France', 'Paris, France', 'New York, USA', 510.00, 210, 180),
+('FL078', 'Delta Airlines', 'Los Angeles, USA', 'Santiago, Chile', 850.00, 260, 240),
+('FL079', 'LATAM', 'Santiago, Chile', 'Los Angeles, USA', 830.00, 260, 230),
+('FL080', 'Lufthansa', 'Rome, Italy', 'Frankfurt, Germany', 120.00, 150, 130),
+('FL081', 'Alitalia', 'Frankfurt, Germany', 'Rome, Italy', 130.00, 150, 120),
+('FL082', 'Emirates', 'Dubai, UAE', 'Johannesburg, South Africa', 1050.00, 380, 350),
+('FL083', 'South African Airways', 'Johannesburg, South Africa', 'Dubai, UAE', 1030.00, 380, 340),
+('FL084', 'Turkish Airlines', 'Istanbul, Turkey', 'New Delhi, India', 450.00, 200, 170),
+('FL085', 'Air India', 'New Delhi, India', 'Istanbul, Turkey', 470.00, 200, 180),
+('FL086', 'Air Canada', 'Montreal, Canada', 'Vancouver, Canada', 350.00, 250, 220),
+('FL087', 'WestJet', 'Vancouver, Canada', 'Montreal, Canada', 360.00, 250, 210),
+('FL088', 'SAS', 'Copenhagen, Denmark', 'Athens, Greece', 280.00, 140, 120),
+('FL089', 'Aegean Airlines', 'Athens, Greece', 'Copenhagen, Denmark', 290.00, 140, 110),
+('FL090', 'China Eastern', 'Beijing, China', 'Seoul, South Korea', 220.00, 180, 160),
+('FL091', 'Korean Air', 'Seoul, South Korea', 'Beijing, China', 230.00, 180, 150),
+('FL092', 'KLM', 'Amsterdam, Netherlands', 'Rome, Italy', 170.00, 130, 110),
+('FL093', 'Alitalia', 'Rome, Italy', 'Amsterdam, Netherlands', 180.00, 130, 100),
+('FL094', 'Aeroméxico', 'Mexico City, Mexico', 'Los Angeles, USA', 400.00, 220, 200),
+('FL095', 'American Airlines', 'Miami, USA', 'New York, USA', 200.00, 240, 220),
+('FL096', 'Delta Airlines', 'New York, USA', 'Miami, USA', 210.00, 240, 210),
+('FL097', 'British Airways', 'London, UK', 'Dublin, Ireland', 80.00, 100, 70),
+('FL098', 'Aer Lingus', 'Dublin, Ireland', 'London, UK', 90.00, 100, 60),
+('FL099', 'Singapore Airlines', 'Singapore, Singapore', 'Perth, Australia', 450.00, 280, 250),
+('FL100', 'Qantas', 'Perth, Australia', 'Singapore, Singapore', 460.00, 280, 240);
+
+
+-- Inserting a sample booking record with final structure
+INSERT INTO booking (user_id, flight_id, pnr, price_paid, passenger_full_name, status) VALUES
+(3, 1, 'PNRBOOKED', 550.00, 'Ali Hassan', 'CONFIRMED');
+
+-- Inserting sample cancellation record
+INSERT INTO cancelled_booking (pnr, user_id, flight_id, price_paid, refund_amount, passenger_full_name) VALUES
+('PNRCANCEL', 3, 2, 1200.50, 960.40, 'Ali Hassan');
+
+-- 4. ADDING 100 NEW DOMESTIC (INDIA) FLIGHTS (FL201 to FL300)
+
+INSERT INTO flight (flight_number, airline, from_city_country, to_city_country, base_price, total_seats, seats_remaining) VALUES
+('FL201', 'IndiGo', 'New Delhi, India', 'Mumbai, India', 120.00, 180, 150),
+('FL202', 'Vistara', 'Mumbai, India', 'New Delhi, India', 130.00, 160, 140),
+('FL203', 'Air India', 'Bengaluru, India', 'New Delhi, India', 110.00, 200, 180),
+('FL204', 'SpiceJet', 'New Delhi, India', 'Bengaluru, India', 115.00, 170, 160),
+('FL205', 'IndiGo', 'Kolkata, India', 'Chennai, India', 90.00, 180, 170),
+('FL206', 'Vistara', 'Chennai, India', 'Kolkata, India', 95.00, 160, 150),
+('FL207', 'Air India', 'Hyderabad, India', 'Mumbai, India', 70.00, 200, 190),
+('FL208', 'IndiGo', 'Mumbai, India', 'Hyderabad, India', 75.00, 180, 170),
+('FL209', 'SpiceJet', 'Goa, India', 'Mumbai, India', 50.00, 170, 160),
+('FL210', 'Vistara', 'Mumbai, India', 'Goa, India', 55.00, 160, 140),
+('FL211', 'IndiGo', 'New Delhi, India', 'Kolkata, India', 100.00, 180, 160),
+('FL212', 'Air India', 'Kolkata, India', 'New Delhi, India', 105.00, 200, 180),
+('FL213', 'Vistara', 'Bengaluru, India', 'Mumbai, India', 80.00, 160, 150),
+('FL214', 'IndiGo', 'Mumbai, India', 'Bengaluru, India', 85.00, 180, 170),
+('FL215', 'SpiceJet', 'Chennai, India', 'New Delhi, India', 130.00, 170, 160),
+('FL216', 'IndiGo', 'New Delhi, India', 'Chennai, India', 135.00, 180, 170),
+('FL217', 'Air India', 'Hyderabad, India', 'Bengaluru, India', 60.00, 200, 190),
+('FL218', 'Vistara', 'Bengaluru, India', 'Hyderabad, India', 65.00, 160, 150),
+('FL219', 'IndiGo', 'Kolkata, India', 'Mumbai, India', 110.00, 180, 170),
+('FL220', 'SpiceJet', 'Mumbai, India', 'Kolkata, India', 115.00, 170, 160),
+('FL221', 'Vistara', 'New Delhi, India', 'Goa, India', 140.00, 160, 140),
+('FL222', 'IndiGo', 'Goa, India', 'New Delhi, India', 145.00, 180, 170),
+('FL223', 'Air India', 'Chennai, India', 'Mumbai, India', 90.00, 200, 180),
+('FL224', 'IndiGo', 'Mumbai, India', 'Chennai, India', 95.00, 180, 170),
+('FL225', 'Vistara', 'Bengaluru, India', 'Kolkata, India', 120.00, 160, 150),
+('FL226', 'IndiGo', 'Kolkata, India', 'Bengaluru, India', 125.00, 180, 170),
+('FL227', 'SpiceJet', 'New Delhi, India', 'Hyderabad, India', 100.00, 170, 160),
+('FL228', 'Air India', 'Hyderabad, India', 'New Delhi, India', 105.00, 200, 190),
+('FL229', 'IndiGo', 'Goa, India', 'Bengaluru, India', 70.00, 180, 170),
+('FL230', 'Vistara', 'Bengaluru, India', 'Goa, India', 75.00, 160, 150),
+('FL231', 'Air India', 'Chennai, India', 'Hyderabad, India', 70.00, 200, 180),
+('FL232', 'IndiGo', 'Hyderabad, India', 'Chennai, India', 75.00, 180, 170),
+('FL233', 'SpiceJet', 'Mumbai, India', 'Jaipur, India', 80.00, 170, 160),
+('FL234', 'Vistara', 'Jaipur, India', 'Mumbai, India', 85.00, 160, 150),
+('FL235', 'IndiGo', 'New Delhi, India', 'Jaipur, India', 40.00, 180, 170),
+('FL236', 'Air India', 'Jaipur, India', 'New Delhi, India', 45.00, 200, 190),
+('FL237', 'Vistara', 'Bengaluru, India', 'Jaipur, India', 130.00, 160, 150),
+('FL238', 'IndiGo', 'Jaipur, India', 'Bengaluru, India', 135.00, 180, 170),
+('FL239', 'SpiceJet', 'Kolkata, India', 'Hyderabad, India', 100.00, 170, 160),
+('FL240', 'Air India', 'Hyderabad, India', 'Kolkata, India', 105.00, 200, 190),
+('FL241', 'IndiGo', 'New Delhi, India', 'Patna, India', 70.00, 180, 170),
+('FL242', 'Vistara', 'Patna, India', 'New Delhi, India', 75.00, 160, 150),
+('FL243', 'SpiceJet', 'Mumbai, India', 'Patna, India', 110.00, 170, 160),
+('FL244', 'IndiGo', 'Patna, India', 'Mumbai, India', 115.00, 180, 170),
+('FL245', 'Air India', 'Kolkata, India', 'Patna, India', 50.00, 200, 190),
+('FL246', 'IndiGo', 'Patna, India', 'Kolkata, India', 55.00, 180, 170),
+('FL247', 'Vistara', 'Bengaluru, India', 'Patna, India', 130.00, 160, 150),
+('FL248', 'IndiGo', 'Patna, India', 'Bengaluru, India', 135.00, 180, 170),
+('FL249', 'SpiceJet', 'Chennai, India', 'Kochi, India', 60.00, 170, 160),
+('FL250', 'IndiGo', 'Kochi, India', 'Chennai, India', 65.00, 180, 170),
+('FL251', 'Vistara', 'Bengaluru, India', 'Kochi, India', 50.00, 160, 150),
+('FL252', 'Air India', 'Kochi, India', 'Bengaluru, India', 55.00, 200, 190),
+('FL253', 'IndiGo', 'New Delhi, India', 'Kochi, India', 150.00, 180, 170),
+('FL254', 'Vistara', 'Kochi, India', 'New Delhi, India', 155.00, 160, 150),
+('FL255', 'SpiceJet', 'Mumbai, India', 'Kochi, India', 90.00, 170, 160),
+('FL256', 'IndiGo', 'Kochi, India', 'Mumbai, India', 95.00, 180, 170),
+('FL257', 'Air India', 'New Delhi, India', 'Guwahati, India', 110.00, 200, 190),
+('FL258', 'IndiGo', 'Guwahati, India', 'New Delhi, India', 115.00, 180, 170),
+('FL259', 'Vistara', 'Kolkata, India', 'Guwahati, India', 60.00, 160, 150),
+('FL260', 'SpiceJet', 'Guwahati, India', 'Kolkata, India', 65.00, 170, 160),
+('FL261', 'IndiGo', 'Mumbai, India', 'Guwahati, India', 140.00, 180, 170),
+('FL262', 'Air India', 'Guwahati, India', 'Mumbai, India', 145.00, 200, 190),
+('FL263', 'Vistara', 'Bengaluru, India', 'Guwahati, India', 150.00, 160, 150),
+('FL264', 'IndiGo', 'Guwahati, India', 'Bengaluru, India', 155.00, 180, 170),
+('FL265', 'SpiceJet', 'New Delhi, India', 'Srinagar, India', 90.00, 170, 160),
+('FL266', 'IndiGo', 'Srinagar, India', 'New Delhi, India', 95.00, 180, 170),
+('FL267', 'Air India', 'Mumbai, India', 'Srinagar, India', 130.00, 200, 190),
+('FL268', 'Vistara', 'Srinagar, India', 'Mumbai, India', 135.00, 160, 150),
+('FL269', 'IndiGo', 'Bengaluru, India', 'Srinagar, India', 170.00, 180, 170),
+('FL270', 'SpiceJet', 'Srinagar, India', 'Bengaluru, India', 175.00, 170, 160),
+('FL271', 'Vistara', 'New Delhi, India', 'Pune, India', 90.00, 160, 150),
+('FL272', 'IndiGo', 'Pune, India', 'New Delhi, India', 95.00, 180, 170),
+('FL273', 'Air India', 'Bengaluru, India', 'Pune, India', 60.00, 200, 190),
+('FL274', 'SpiceJet', 'Pune, India', 'Bengaluru, India', 65.00, 170, 160),
+('FL275', 'IndiGo', 'Mumbai, India', 'Pune, India', 30.00, 180, 170),
+('FL276', 'Vistara', 'Pune, India', 'Mumbai, India', 35.00, 160, 150),
+('FL277', 'Air India', 'Hyderabad, India', 'Pune, India', 50.00, 200, 190),
+('FL278', 'IndiGo', 'Pune, India', 'Hyderabad, India', 55.00, 180, 170),
+('FL279', 'SpiceJet', 'Chennai, India', 'Pune, India', 70.00, 170, 160),
+('FL280', 'Vistara', 'Pune, India', 'Chennai, India', 75.00, 160, 150),
+('FL281', 'IndiGo', 'Kolkata, India', 'Pune, India', 120.00, 180, 170),
+('FL282', 'Air India', 'Pune, India', 'Kolkata, India', 125.00, 200, 190),
+('FL283', 'Vistara', 'New Delhi, India', 'Ahmedabad, India', 80.00, 160, 150),
+('FL284', 'IndiGo', 'Ahmedabad, India', 'New Delhi, India', 85.00, 180, 170),
+('FL285', 'SpiceJet', 'Mumbai, India', 'Ahmedabad, India', 50.00, 170, 160),
+('FL286', 'Air India', 'Ahmedabad, India', 'Mumbai, India', 55.00, 200, 190),
+('FL287', 'IndiGo', 'Bengaluru, India', 'Ahmedabad, India', 90.00, 180, 170),
+('FL288', 'Vistara', 'Ahmedabad, India', 'Bengaluru, India', 95.00, 160, 150),
+('FL289', 'Air India', 'Chennai, India', 'Ahmedabad, India', 100.00, 200, 190),
+('FL290', 'IndiGo', 'Ahmedabad, India', 'Chennai, India', 105.00, 180, 170),
+('FL291', 'SpiceJet', 'Hyderabad, India', 'Ahmedabad, India', 70.00, 170, 160),
+('FL292', 'Vistara', 'Ahmedabad, India', 'Hyderabad, India', 75.00, 160, 150),
+('FL293', 'IndiGo', 'Kolkata, India', 'Ahmedabad, India', 130.00, 180, 170),
+('FL294', 'Air India', 'Ahmedabad, India', 'Kolkata, India', 135.00, 200, 190),
+('FL295', 'Vistara', 'New Delhi, India', 'Lucknow, India', 60.00, 160, 150),
+('FL296', 'IndiGo', 'Lucknow, India', 'New Delhi, India', 65.00, 180, 170),
+('FL297', 'SpiceJet', 'Mumbai, India', 'Lucknow, India', 100.00, 170, 160),
+('FL298', 'Air India', 'Lucknow, India', 'Mumbai, India', 105.00, 200, 190),
+('FL299', 'IndiGo', 'Bengaluru, India', 'Lucknow, India', 120.00, 180, 170),
+('FL300', 'Vistara', 'Lucknow, India', 'Bengaluru, India', 125.00, 160, 150);
+
+-- 5. ADDING 50 NEW INTERNATIONAL FLIGHTS (FL301 to FL350)
+
+INSERT INTO flight (flight_number, airline, from_city_country, to_city_country, base_price, total_seats, seats_remaining) VALUES
+('FL301', 'Emirates', 'New Delhi, India', 'Dubai, UAE', 380.00, 300, 250),
+('FL302', 'Air India', 'Dubai, UAE', 'New Delhi, India', 370.00, 280, 260),
+('FL303', 'British Airways', 'Mumbai, India', 'London, UK', 700.00, 350, 310),
+('FL304', 'Vistara', 'London, UK', 'Mumbai, India', 710.00, 300, 280),
+('FL305', 'Lufthansa', 'Bengaluru, India', 'Frankfurt, Germany', 750.00, 280, 250),
+('FL306', 'Lufthansa', 'Frankfurt, Germany', 'Bengaluru, India', 760.00, 280, 260),
+('FL307', 'Singapore Airlines', 'Chennai, India', 'Singapore, Singapore', 450.00, 240, 210),
+('FL308', 'Singapore Airlines', 'Singapore, Singapore', 'Chennai, India', 460.00, 240, 220),
+('FL309', 'Air France', 'Kolkata, India', 'Paris, France', 800.00, 260, 230),
+('FL310', 'Air France', 'Paris, France', 'Kolkata, India', 810.00, 260, 240),
+('FL311', 'Emirates', 'Hyderabad, India', 'Dubai, UAE', 400.00, 300, 280),
+('FL312', 'IndiGo', 'Dubai, UAE', 'Hyderabad, India', 390.00, 180, 160),
+('FL313', 'Thai Airways', 'New Delhi, India', 'Bangkok, Thailand', 300.00, 220, 200),
+('FL314', 'Thai Airways', 'Bangkok, Thailand', 'New Delhi, India', 310.00, 220, 190),
+('FL315', 'Cathay Pacific', 'Mumbai, India', 'Hong Kong, China', 550.00, 270, 240),
+('FL316', 'Cathay Pacific', 'Hong Kong, China', 'Mumbai, India', 560.00, 270, 250),
+('FL317', 'Qantas', 'Bengaluru, India', 'Sydney, Australia', 900.00, 300, 270),
+('FL318', 'Qantas', 'Sydney, Australia', 'Bengaluru, India', 920.00, 300, 280),
+('FL319', 'KLM', 'New Delhi, India', 'Amsterdam, Netherlands', 720.00, 290, 260),
+('FL320', 'KLM', 'Amsterdam, Netherlands', 'New Delhi, India', 730.00, 290, 270),
+('FL321', 'Air Canada', 'Mumbai, India', 'Toronto, Canada', 950.00, 330, 300),
+('FL322', 'Air Canada', 'Toronto, Canada', 'Mumbai, India', 960.00, 330, 290),
+('FL323', 'United Airlines', 'New Delhi, India', 'New York, USA', 1000.00, 350, 320),
+('FL324', 'Air India', 'New York, USA', 'New Delhi, India', 1020.00, 350, 310),
+('FL325', 'Delta Airlines', 'Mumbai, India', 'New York, USA', 1050.00, 340, 300),
+('FL326', 'Delta Airlines', 'New York, USA', 'Mumbai, India', 1060.00, 340, 310),
+('FL327', 'Emirates', 'Kochi, India', 'Dubai, UAE', 320.00, 250, 220),
+('FL328', 'IndiGo', 'Dubai, UAE', 'Kochi, India', 310.00, 180, 160),
+('FL329', 'Singapore Airlines', 'New Delhi, India', 'Singapore, Singapore', 480.00, 300, 270),
+('FL330', 'Singapore Airlines', 'Singapore, Singapore', 'New Delhi, India', 490.00, 300, 280),
+('FL331', 'Lufthansa', 'Mumbai, India', 'Munich, Germany', 780.00, 290, 260),
+('FL332', 'Lufthansa', 'Munich, Germany', 'Mumbai, India', 790.00, 290, 270),
+('FL333', 'Turkish Airlines', 'New Delhi, India', 'Istanbul, Turkey', 550.00, 270, 240),
+('FL334', 'Turkish Airlines', 'Istanbul, Turkey', 'New Delhi, India', 560.00, 270, 250),
+('FL335', 'Qantas', 'Mumbai, India', 'Sydney, Australia', 950.00, 320, 290),
+('FL336', 'Qantas', 'Sydney, Australia', 'Mumbai, India', 960.00, 320, 300),
+('FL337', 'Japan Airlines', 'New Delhi, India', 'Tokyo, Japan', 850.00, 240, 210),
+('FL338', 'Japan Airlines', 'Tokyo, Japan', 'New Delhi, India', 860.00, 240, 220),
+('FL339', 'Emirates', 'New York, USA', 'Dubai, UAE', 1100.00, 400, 350),
+('FL340', 'Emirates', 'Dubai, UAE', 'New York, USA', 1120.00, 400, 360),
+('FL341', 'Lufthansa', 'Frankfurt, Germany', 'Los Angeles, USA', 900.00, 330, 300),
+('FL342', 'Lufthansa', 'Los Angeles, USA', 'Frankfurt, Germany', 910.00, 330, 290),
+('FL343', 'British Airways', 'London, UK', 'Singapore, Singapore', 850.00, 310, 280),
+('FL344', 'Singapore Airlines', 'Singapore, Singapore', 'London, UK', 860.00, 310, 290),
+('FL345', 'Air France', 'Paris, France', 'Montreal, Canada', 600.00, 270, 240),
+('FL346', 'Air Canada', 'Montreal, Canada', 'Paris, France', 610.00, 270, 250),
+('FL347', 'Qantas', 'Sydney, Australia', 'London, UK', 1300.00, 360, 320),
+('FL348', 'British Airways', 'London, UK', 'Sydney, Australia', 1320.00, 360, 330),
+('FL349', 'Emirates', 'Dubai, UAE', 'Kuwait City, Kuwait', 150.00, 180, 160),
+('FL350', 'Kuwait Airways', 'Kuwait City, Kuwait', 'Dubai, UAE', 160.00, 180, 150);
